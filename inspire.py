@@ -97,31 +97,38 @@ if len(records) > 0:
     console.print("total: {}; size: {}".format(records["hits"]["total"],
                                                len(records["hits"]["hits"])))
 
-for hit in records["hits"]["hits"]:
-    console.print(hit.keys())
-    console.print(hit['links'])
-    console.print(hit['metadata'].keys())
-    console.print(hit['metadata']['arxiv_eprints'])
-    # console.print(hit['metadata']['authors'])
-    console.print( ", ".join(map(lambda aut : aut['last_name'], hit['metadata']['authors'][:10])) + (" et al." if hit['metadata']['author_count'] > 10 else "") )
-#sys.exit(0)
-
-choices = list(
-    map(
-        lambda hit:
-            "\t" +
-            # hit['metadata']['texkeys'][0] + "\n\t" +
-            ", ".join(map(lambda aut : aut['last_name'], hit['metadata']['authors'][:int(config['local']['max_num_authors'])])) +
-            (" et al." if hit['metadata']['author_count'] > int(config['local']['max_num_authors']) else "") + "\n\t" +
-            '"' + hit['metadata']['titles'][0]['title'] + '"\n\t' ,
-        records["hits"]["hits"]))
+# #> inspect the entry
+# for hit in records["hits"]["hits"]:
+#     console.print(hit.keys())
+#     console.print(hit['links'])
+#     console.print(hit['metadata'].keys())
+#     console.print(hit['metadata']['arxiv_eprints'])
+#     console.print(hit['metadata']['earliest_date'])
+#     console.print( ", ".join(map(lambda aut : aut['last_name'], hit['metadata']['authors'][:10])) + (" et al." if hit['metadata']['author_count'] > 10 else "") )
+# #sys.exit(0)
+def make_label(hit: dict, max_num_authors: int) -> str:
+    label = ''
+    label += '\t[underline]' + hit['metadata']['texkeys'][0] + '[/underline]'
+    label += ' (' + hit['metadata']['earliest_date'] + ')\n'
+    author_list = ', '.join(
+        map(lambda aut: aut['last_name'],
+            hit['metadata']['authors'][:max_num_authors]))
+    if hit['metadata']['author_count'] > max_num_authors:
+        author_list += ' et al.'
+    label += '\t[bold]' + author_list + '[/bold]' + '\n'
+    label += '\t[italic]"' + hit['metadata']['titles'][0][
+        'title'] + '"[/italic]' + '\n'
+    return label
+choices = [
+    make_label(hit, int(config['local']['max_num_authors']))
+    for hit in records["hits"]["hits"]
+]
 
 selected_indices = select_multiple(choices,
                         tick_character='◦',
                         pagination=True,
                         page_size=5,
                         return_indices=True)
-console.print(selected_indices)
 
 #> get bibtex entries and save to file
 for idx in selected_indices:
