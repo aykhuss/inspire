@@ -21,76 +21,106 @@ __author__ = 'Alexander Huss'
 
 console = Console()
 
-#> read in the configuration, otherwise create it
-config = configparser.ConfigParser()
-config_file = os.path.join(os.path.dirname(__file__) , 'inspire.ini')
-if os.path.exists(config_file):
-    config.read(config_file)
-else:
-    if confirm("missing configuration file. create one now?", default_is_yes=True):
-        config.add_section('query')
-        default_size = prompt('Default result length?',
-                              target_type=int, initial_value='10',
-                              validator=lambda count: count > 0)
-        config.set(section='query', option='size', value=str(default_size))
-        config.add_section('local')
-        max_num_authors = prompt('maximum number of authors to display?',
-                              target_type=int, initial_value='5',
-                              validator=lambda count: count > 0)
-        config.set(section='local', option='max_num_authors', value=str(max_num_authors))
-        default_bib = prompt('Default bibliography file?', target_type=str)
-        # , validator=lambda bib_file: os.path.isfile(bib_file))
-        config.set(section='local',
-                   option='bib_file',
-                   value=os.path.expanduser(default_bib))
-        os.makedirs(os.path.dirname(config['local']['bib_file']), exist_ok=True)
-        with open(config['local']['bib_file'], 'w') as bib:
-            bib.write("# created by {} on {} \n".format(__file__,datetime.now()))
-        default_pdf_dir = prompt('Default PDF directory?', target_type=str)
-        # , validator=lambda pdf_dir: os.path.isdir(pdf_dir))
-        config.set(section='local',
-                   option='pdf_dir',
-                   value=os.path.expanduser(default_pdf_dir))
-        os.makedirs(config['local']['pdf_dir'], exist_ok=True)
-        with open(config_file, 'w') as cfg:
-            config.write(cfg)
 
-parser = argparse.ArgumentParser(prog='inspire',
+def get_config() -> configparser.ConfigParser:
+    #> local configuration file
+    config_file = os.path.join(os.path.dirname(__file__), 'inspire.ini')
+    #> default settings
+    config_defaults = {
+        'query': {
+            'size': '10'
+        },
+        'local': {
+            'max_num_authors': '5',
+            'page_size': '5',
+            'bib_file': os.path.join(os.path.dirname(__file__),
+                                     'bibliography', 'references.bib'),
+            'pdf_dir': os.path.join(os.path.dirname(__file__),
+                                    'bibliography', 'bibtex-pdfs')
+        }
+    }
+    config = configparser.ConfigParser()
+    config.read_dict(config_defaults)
+    if os.path.exists(config_file):
+        config.read(config_file)
+    else:
+        if confirm(
+                'missing configuration file. create one now?\n[italic]{}[/italic]'
+                .format(config_file),
+                default_is_yes=True):
+            default_size = prompt('default size of records to retrieve?',
+                                  target_type=int,
+                                  initial_value=config['query']['size'],
+                                  validator=lambda count: count > 0)
+            config.set(section='query', option='size', value=str(default_size))
+            max_num_authors = prompt(
+                'maximum number of authors to display?',
+                target_type=int,
+                initial_value=config['local']['max_num_authors'],
+                validator=lambda count: count > 0)
+            config.set(section='local', option='max_num_authors',
+                       value=str(max_num_authors))
+            default_bib = prompt('default bibliography file?',
+                                 target_type=str,
+                                 initial_value=config['local']['bib_file'])
+            config.set(section='local', option='bib_file',
+                       value=os.path.expanduser(default_bib))
+            os.makedirs(os.path.dirname(config['local']['bib_file']),
+                        exist_ok=True)
+            with open(config['local']['bib_file'], 'w') as bib:
+                bib.write("# created by {} on {} \n".format(
+                    os.path.basename(__file__), datetime.now()))
+            default_pdf_dir = prompt('default directory for PDF files?',
+                                     target_type=str,
+                                     initial_value=config['local']['pdf_dir'])
+            config.set(section='local', option='pdf_dir',
+                       value=os.path.expanduser(default_pdf_dir))
+            os.makedirs(config['local']['pdf_dir'], exist_ok=True)
+            with open(config_file, 'w') as cfg:
+                config.write(cfg)
+    return config
+
+config = get_config()
+
+parser = argparse.ArgumentParser(prog='iNSPIRE',
                                  description='an amazing inspire CLI script')
-#> no separate query argument
-#> for convenience we'll take the remainder to be the query (see below)
-#parser.add_argument("-q", "--query", type=str, required=True)
-#> we do literature search only for now...
-parser.add_argument('--sort',
+parser.add_argument('query', nargs='*', help='the inspirehep query')
+parser.add_argument('-b',
+                    '--bib',
                     type=str,
-                    default='mostrecent',
-                    const='mostrecent',
                     nargs='?',
+                    const='default.bib',
+                    help='bibliography file to update')
+parser.add_argument('-u',
+                    '--update',
+                    action='store_true',
+                    help='update entire bibliography file')
+parser.add_argument('--sort',
+                    default='mostrecent',
                     choices=['mostrecent', 'mostcited'],
                     help='the sorting order')
 parser.add_argument('--size',
                     type=int,
                     default=int(config['query']['size']),
-                    help='number of records to display')
-parser.add_argument('--downlaod',
-                    type=bool,
-                    help='try to downlaod the PDF file')
-parser.add_argument('query', nargs='*',
-                    help='the inspirehep query')  # all the left-overs
+                    help='number of records to retrieve')
 args = parser.parse_args()
 # console.print(args)
 
 #> get records from inspirehep
-spinner = Spinner(DOTS, "getting [blue]iNSPIRE[/blue]d...")
+spinner = Spinner(DOTS, 'getting [blue]iNSPIRE[/blue]d...')
 spinner.start()
 records = dict()
-query = "https://inspirehep.net/api/literature"
+query = 'https://inspirehep.net/api/literature'
 query += '?sort={}'.format(args.sort)
 query += '&size={:d}'.format(args.size)
-query += '&q=' + urllib.parse.quote(" ".join(args.query))
+query += '&q=' + urllib.parse.quote(' '.join(args.query))
 with urllib.request.urlopen(query) as req:
     records = json.load(req)
 spinner.stop()
+# console.print(records.keys())
+# console.print(records['hits'].keys())
+# console.print(records['links'].keys())
+# console.print(records['links']['bibtex'])
 # console.print(json.dumps(records))
 
 if len(records) > 0:
@@ -129,7 +159,7 @@ choices = [
 ]
 
 selected_indices = select_multiple(choices,
-                        tick_character='◦',
+                        # tick_character='◦',
                         pagination=True,
                         page_size=5,
                         return_indices=True,tick_style='blue',cursor_style='blue')
