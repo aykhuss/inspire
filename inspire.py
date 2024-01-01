@@ -81,7 +81,7 @@ args = parser.parse_args()
 # console.print(args)
 
 #> get records from inspirehep
-spinner = Spinner(DOTS, "getting inspired...")
+spinner = Spinner(DOTS, "getting [blue]iNSPIRE[/blue]d...")
 spinner.start()
 records = dict()
 query = "https://inspirehep.net/api/literature"
@@ -102,16 +102,20 @@ if len(records) > 0:
 #     console.print(hit.keys())
 #     console.print(hit['links'])
 #     console.print(hit['metadata'].keys())
-#     console.print(hit['metadata']['arxiv_eprints'])
+#     #console.print(hit['metadata']['arxiv_eprints'])
 #     console.print(hit['metadata']['earliest_date'])
+#     console.print(hit['metadata']['authors'])
 #     console.print( ", ".join(map(lambda aut : aut['last_name'], hit['metadata']['authors'][:10])) + (" et al." if hit['metadata']['author_count'] > 10 else "") )
 # #sys.exit(0)
 def make_label(hit: dict, max_num_authors: int) -> str:
     label = ''
     label += '\t[underline]' + hit['metadata']['texkeys'][0] + '[/underline]'
+    if len(hit['metadata']['texkeys']) > 1:
+        for alt_texkey in hit['metadata']['texkeys'][1:]:
+            label += '[italic], [/italic]' + alt_texkey
     label += ' (' + hit['metadata']['earliest_date'] + ')\n'
     author_list = ', '.join(
-        map(lambda aut: aut['last_name'],
+        map(lambda aut: aut['full_name'],
             hit['metadata']['authors'][:max_num_authors]))
     if hit['metadata']['author_count'] > max_num_authors:
         author_list += ' et al.'
@@ -128,42 +132,71 @@ selected_indices = select_multiple(choices,
                         tick_character='◦',
                         pagination=True,
                         page_size=5,
-                        return_indices=True)
+                        return_indices=True,tick_style='blue',cursor_style='blue')
+
+#> all texkeys in the database
+bib_texkeys = list()
+re_keys = re.compile(r'@\w+\{\s*([a-zA-Z0-9_\-\.:]+)\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
+with open(config['local']['bib_file'],'r') as bib:
+    bib_texkeys = re_keys.findall(bib.read())
+
+do_update = True
 
 #> get bibtex entries and save to file
 for idx in selected_indices:
     texkey = records["hits"]["hits"][idx]['metadata']['texkeys'][0]
+    spinner = Spinner(DOTS, "fetching BibTeX for {}...".format(texkey))
+    spinner.start()
     bibtex = urllib.request.urlopen(records["hits"]["hits"][idx]['links']['bibtex']).read().decode('utf-8')
+    spinner.stop()
     console.print(bibtex)
-    #> play around with regular expressions to get the bibtext entry
-    re_key = re.compile(r'@\w+\{\s*'+texkey+r'\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
-    with open(config['local']['bib_file'],'r') as bib:
-        res = re_key.findall(bib.read())
-        console.print("FINDALL")
-        console.print(res)
-    res = re_key.findall(bibtex)
-    console.print("FINDSELF")
-    console.print(res)
+    # re_key = re.compile(r'@\w+\{\s*'+texkey+r'\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
+    # with open(config['local']['bib_file'],'r') as bib:
+    #     res = re_key.findall(bib.read())
+    #     console.print("FINDALL")
+    #     console.print(res)
+    # res = re_key.findall(bibtex)
+    # console.print("FINDSELF")
+    # console.print(res)
     #> check database if already there
-    with open(config['local']['bib_file'],'r+') as bib:
-        if bib.read().count(texkey) == 0:
-            bib.write('\n' + bibtex + '\n')
-        else:
-            console.print('entry "{}" already in database'.format(texkey))
+    # with open(config['local']['bib_file'],'r+') as bib:
+    #     if bib.read().count(texkey) == 0:
+    #         bib.write('\n' + bibtex + '\n')
+    #     else:
+    #         console.print('entry "{}" already in database'.format(texkey))
+    #> append to bib file
+    if texkey in bib_texkeys :
+        console.print('entry "{}" found in database'.format(texkey))
+        if do_update:
+            print("time for an update!")
+            re_key = re.compile(r'@\w+\{\s*'+texkey+r'\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
+        #@todo:  allow update option?
+        #continue
+    else:
+        with open(config['local']['bib_file'],'a') as bib:
+            bib.write('\n' + bibtex)
 
     #> get the PDF file and save
-    #> identifier: https://info.arxiv.org/help/arxiv_identifier_for_services.html
-    #> alternatively could consider using the arix API? (seems overkill for now)
-    #> has arxiv entry?
-    if 'arxiv_eprints' in records["hits"]["hits"][idx]['metadata']:
-        arxiv_id = records["hits"]["hits"][idx]['metadata']['arxiv_eprints'][0]['value']
-        #> old style has the category prefix (primary)
-        if not re.match(r'\d+\.\d+', arxiv_id):
-            arxiv_id = records["hits"]["hits"][idx]['metadata']['arxiv_eprints'][0]['categories'][0] + '/' + arxiv_id
-        console.print('downloading arXiv:' + arxiv_id)
-        urllib.request.urlretrieve('http://arxiv.org/pdf/' + arxiv_id + '.pdf', os.path.join(config['local']['pdf_dir'] , texkey + '.pdf'))
+    pdf_file = os.path.join(config['local']['pdf_dir'] , texkey + '.pdf')
+    if os.path.exists(pdf_file):
+        console.print('already have PDF for record "{}"'.format(texkey))
+        #@todo check timestamp and update?
+        pass
     else:
-        console.print('"{}" has no arXiv entry for PDF download'.format(texkey))
+        #> identifier: https://info.arxiv.org/help/arxiv_identifier_for_services.html
+        #> alternatively could consider using the arix API? (seems overkill for now)
+        #> has arxiv entry?
+        if 'arxiv_eprints' in records["hits"]["hits"][idx]['metadata']:
+            arxiv_id = records["hits"]["hits"][idx]['metadata']['arxiv_eprints'][0]['value']
+            #> old style has the category prefix (primary)
+            if not re.match(r'\d+\.\d+', arxiv_id):
+                arxiv_id = records['hits']['hits'][idx]['metadata']['arxiv_eprints'][0]['categories'][0] + '/' + arxiv_id
+            spinner = Spinner(DOTS, 'downloading PDF for "{}" from arXiv:{}...'.format(texkey,arxiv_id))
+            spinner.start()
+            urllib.request.urlretrieve('http://arxiv.org/pdf/' + arxiv_id + '.pdf', pdf_file)
+            spinner.stop()
+        else:
+            console.print('"{}" has no arXiv entry for PDF download'.format(texkey))
 
 
 sys.exit(0)

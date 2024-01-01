@@ -1,7 +1,7 @@
 # inspire
 > A simple python CLI script to query inspirehep.net and populate bibliography databases.
 
-An [INSPIRE](https://inspirehep.net) CLI script using its [REST API](https://github.com/inspirehep/rest-api-doc).
+An [iNSPIRE](https://inspirehep.net) CLI script using its [REST API](https://github.com/inspirehep/rest-api-doc).
 
 ## Requirements
 Install the required packages using
