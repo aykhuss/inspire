@@ -205,10 +205,18 @@ if __name__ == '__main__':
         if not args.bib:
             raise RuntimeError('update requires a bibliography file (-b [bib-file])')
 
+        bib_texkeys = bib_get_texkeys(args.bib)
         bib_bak = args.bib + '.bak'
+        if os.path.exists(bib_bak):
+            bak_texkeys = bib_get_texkeys(bib_bak)
+            if confirm('found backup[{}] for {}[{}]. restore?'.format(
+                    len(bak_texkeys), os.path.basename(args.bib), len(bib_texkeys)),
+                       default_is_yes=(len(bak_texkeys) > len(bib_texkeys))):
+                shutil.move(bib_bak, args.bib)
+            else:
+                os.remove(bib_bak)
         #@todo if backup exists ask user to restore it?
         shutil.copyfile(args.bib, bib_bak)
-        bib_texkeys = bib_get_texkeys(args.bib)
         with open(args.bib, 'w') as bib:
             bib.write("# updated by {} on {} \n".format(
                 os.path.basename(__file__), datetime.now()))
