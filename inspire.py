@@ -82,6 +82,8 @@ def get_config() -> configparser.ConfigParser:
 def get_records(query: str,
                 sort: str = 'mostrecent',
                 size: int = 1) -> tuple[list, int]:
+    if not query:
+        return [], 0
     inspire_result = dict()
     inspire_query = 'https://inspirehep.net/api/literature'
     inspire_query += '?sort={}'.format(sort)
