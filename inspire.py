@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
-import time
-import sys
-import os
+import sys, os, shutil
 import json
 import urllib, urllib.request, urllib.parse
 import configparser
@@ -14,6 +12,8 @@ from beaupy import confirm, prompt, select, select_multiple
 from beaupy.spinners import *
 from rich.console import Console
 from rich.syntax import Syntax
+from rich.progress import (Progress, BarColumn, TaskProgressColumn,
+                           TimeRemainingColumn, TextColumn)
 
 __version__ = '0.1'
 __author__ = 'Alexander Huss'
@@ -113,9 +113,12 @@ def make_label(record: dict, max_num_authors: int) -> str:
 def make_selection(records: list,
                    max_num_authors: int = 5,
                    page_size: int = 5) -> list:
+    #> using records &
+    #> preprocessor=lambda rec: make_label(rec, max_num_authors),
+    #> becomes *really* slow for large sizes
+    choices = [ make_label(rec, max_num_authors) for rec in records ]
     selected_indices = select_multiple(
-        records,
-        preprocessor=lambda rec: make_label(rec, max_num_authors),
+        choices,
         tick_character='◦',
         pagination=True,
         page_size=page_size,
@@ -199,8 +202,34 @@ if __name__ == '__main__':
     if args.update:
         if not args.bib:
             raise RuntimeError('update requires a bibliography file (-b [bib-file])')
-        else:
-            console.print("implement UPDATE")
+
+        bib_bak = args.bib + '.bak'
+        #@todo if backup exists ask user to restore it?
+        shutil.copyfile(args.bib, bib_bak)
+        bib_texkeys = bib_get_texkeys(args.bib)
+        with open(args.bib, 'w') as bib:
+            bib.write("# updated by {} on {} \n".format(
+                os.path.basename(__file__), datetime.now()))
+        with Progress(BarColumn(),
+                      TaskProgressColumn(),
+                      TimeRemainingColumn(),
+                      TextColumn("[progress.description]{task.description}"),
+                      transient=True) as progress:
+            task = progress.add_task("updating", total=len(bib_texkeys))
+            for texkey in bib_texkeys:
+                records, total = get_records(texkey, size=1)
+                records = list(
+                    filter(lambda rec: 'texkeys' in rec['metadata'], records))
+                records = list(
+                    filter(lambda rec: texkey in rec['metadata']['texkeys'], records))
+                if len(records) != 1:
+                    raise ValueError('error with "{}": {}/{}'.format(
+                        texkey, len(records), total))
+                else:
+                    bibtex = retrieve_link(records[0], 'bibtex')
+                    bib_append_entry(args.bib, bibtex)
+                progress.update(task, advance=1.0, description=texkey)
+            os.remove(bib_bak)
 
 
     #> get records from inspirehep
@@ -208,6 +237,7 @@ if __name__ == '__main__':
     spinner.start()
     records, total = get_records(' '.join(args.query), args.sort, args.size)
     spinner.stop()
+    records = list(filter(lambda rec : 'texkeys' in rec['metadata'], records))
     console.print("total: {}; size: {}".format(total, len(records)))
 
     if total > 1:
@@ -215,10 +245,14 @@ if __name__ == '__main__':
                                  int(config['local']['page_size']))
 
     #> all texkeys in the database
-    bib_texkeys = bib_get_texkeys(config['local']['bib_file'])
+    if args.bib:
+        bib_texkeys = bib_get_texkeys(args.bib)
+    else:
+        bib_texkeys = []
 
     #> get bibtex entries
     for rec in records:
+        texkey = rec['metadata']['texkeys'][0]
         if not args.bib or args.display:
             key = args.display if args.display else config['local']['display']
             if key in ['latex-eu', 'latex-us']:
@@ -231,10 +265,12 @@ if __name__ == '__main__':
                 lexer = 'json'
             else:
                 lexer = 'text'
-            syntax = Syntax(retrieve_link(rec, key), lexer=lexer, word_wrap=True)
+            spinner = Spinner(DOTS, "fetching {} for {}...".format(key,texkey))
+            spinner.start()
+            syntax = Syntax('\n' + retrieve_link(rec, key), lexer=lexer, word_wrap=True)
+            spinner.stop()
             console.print(syntax)
         else:
-            texkey = rec['metadata']['texkeys'][0]
             spinner = Spinner(DOTS, "fetching BibTeX for {}...".format(texkey))
             spinner.start()
             bibtex = retrieve_link(rec,'bibtex')
