@@ -17,7 +17,6 @@ from rich.console import Console
 __version__ = '0.1'
 __author__ = 'Alexander Huss'
 
-#@todo check that it's python3? and terminate gracefully otherwise?
 
 console = Console()
 
@@ -79,7 +78,6 @@ def get_config() -> configparser.ConfigParser:
             with open(config_file, 'w') as cfg:
                 config.write(cfg)
     return config
-
 config = get_config()
 
 parser = argparse.ArgumentParser(prog='iNSPIRE',
@@ -103,81 +101,90 @@ parser.add_argument('--size',
                     type=int,
                     default=int(config['query']['size']),
                     help='number of records to retrieve')
+parser.add_argument('--page-size',
+                    type=int,
+                    default=int(config['local']['page_size']),
+                    help='number of records to show per page')
 args = parser.parse_args()
 # console.print(args)
+
+def get_records(query: str,
+                sort: str = 'mostrecent',
+                size: int = 1) -> tuple[list, int]:
+    inspire_result = dict()
+    inspire_query = 'https://inspirehep.net/api/literature'
+    inspire_query += '?sort={}'.format(sort)
+    inspire_query += '&size={:d}'.format(size)
+    inspire_query += '&q=' + urllib.parse.quote(query)
+    console.print(inspire_query)
+    with urllib.request.urlopen(inspire_query) as req:
+        inspire_result = json.load(req)
+    return inspire_result["hits"]["hits"], inspire_result["hits"]["total"]
+
 
 #> get records from inspirehep
 spinner = Spinner(DOTS, 'getting [blue]iNSPIRE[/blue]d...')
 spinner.start()
-records = dict()
-query = 'https://inspirehep.net/api/literature'
-query += '?sort={}'.format(args.sort)
-query += '&size={:d}'.format(args.size)
-query += '&q=' + urllib.parse.quote(' '.join(args.query))
-with urllib.request.urlopen(query) as req:
-    records = json.load(req)
+records, total = get_records(' '.join(args.query), args.sort, args.size)
 spinner.stop()
-# console.print(records.keys())
-# console.print(records['hits'].keys())
-# console.print(records['links'].keys())
-# console.print(records['links']['bibtex'])
-# console.print(json.dumps(records))
+console.print("total: {}; size: {}".format(total, len(records)))
 
-if len(records) > 0:
-    console.print("total: {}; size: {}".format(records["hits"]["total"],
-                                               len(records["hits"]["hits"])))
 
-# #> inspect the entry
-# for hit in records["hits"]["hits"]:
-#     console.print(hit.keys())
-#     console.print(hit['links'])
-#     console.print(hit['metadata'].keys())
-#     #console.print(hit['metadata']['arxiv_eprints'])
-#     console.print(hit['metadata']['earliest_date'])
-#     console.print(hit['metadata']['authors'])
-#     console.print( ", ".join(map(lambda aut : aut['last_name'], hit['metadata']['authors'][:10])) + (" et al." if hit['metadata']['author_count'] > 10 else "") )
-# #sys.exit(0)
-def make_label(hit: dict, max_num_authors: int) -> str:
+
+def make_label(record: dict, max_num_authors: int) -> str:
     label = ''
-    label += '\t[underline]' + hit['metadata']['texkeys'][0] + '[/underline]'
-    if len(hit['metadata']['texkeys']) > 1:
-        for alt_texkey in hit['metadata']['texkeys'][1:]:
+    label += '\t[underline]' + record['metadata']['texkeys'][0] + '[/underline]'
+    if len(record['metadata']['texkeys']) > 1:
+        for alt_texkey in record['metadata']['texkeys'][1:]:
             label += '[italic], [/italic]' + alt_texkey
-    label += ' (' + hit['metadata']['earliest_date'] + ')\n'
+    label += ' (' + record['metadata']['earliest_date'] + ')\n'
     author_list = ', '.join(
         map(lambda aut: aut['full_name'],
-            hit['metadata']['authors'][:max_num_authors]))
-    if hit['metadata']['author_count'] > max_num_authors:
+            record['metadata']['authors'][:max_num_authors]))
+    if record['metadata']['author_count'] > max_num_authors:
         author_list += ' et al.'
     label += '\t[bold]' + author_list + '[/bold]' + '\n'
-    label += '\t[italic]"' + hit['metadata']['titles'][0][
+    label += '\t[italic]"' + record['metadata']['titles'][0][
         'title'] + '"[/italic]' + '\n'
     return label
-choices = [
-    make_label(hit, int(config['local']['max_num_authors']))
-    for hit in records["hits"]["hits"]
-]
 
-selected_indices = select_multiple(choices,
-                        # tick_character='◦',
-                        pagination=True,
-                        page_size=5,
-                        return_indices=True,tick_style='blue',cursor_style='blue')
+def make_selection(records: list,
+                   max_num_authors: int = 5,
+                   page_size: int = 5) -> list:
+    selected_indices = select_multiple(
+        records,
+        preprocessor=lambda rec: make_label(rec, max_num_authors),
+        tick_character='◦',
+        pagination=True,
+        page_size=page_size,
+        return_indices=True,
+        tick_style='blue',
+        cursor_style='blue')
+    return [records[i] for i in selected_indices]
+
+records = make_selection(records, int(config['local']['max_num_authors']),
+                         int(config['local']['page_size']))
+
+def get_bib_texkeys(bib_file: str) -> list[str]:
+    bib_texkeys = list()
+    re_keys = re.compile(
+        r'@\w+\{\s*([a-zA-Z0-9_\-\.:]+)\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',
+        re.MULTILINE)
+    with open(bib_file, 'r') as bib:
+        bib_texkeys = re_keys.findall(bib.read())
+    return bib_texkeys
 
 #> all texkeys in the database
-bib_texkeys = list()
-re_keys = re.compile(r'@\w+\{\s*([a-zA-Z0-9_\-\.:]+)\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
-with open(config['local']['bib_file'],'r') as bib:
-    bib_texkeys = re_keys.findall(bib.read())
+bib_texkeys = get_bib_texkeys(config['local']['bib_file'])
 
 do_update = True
 
 #> get bibtex entries and save to file
-for idx in selected_indices:
-    texkey = records["hits"]["hits"][idx]['metadata']['texkeys'][0]
+for rec in records:
+    texkey = rec['metadata']['texkeys'][0]
     spinner = Spinner(DOTS, "fetching BibTeX for {}...".format(texkey))
     spinner.start()
-    bibtex = urllib.request.urlopen(records["hits"]["hits"][idx]['links']['bibtex']).read().decode('utf-8')
+    bibtex = urllib.request.urlopen(rec['links']['bibtex']).read().decode('utf-8')
     spinner.stop()
     console.print(bibtex)
     # re_key = re.compile(r'@\w+\{\s*'+texkey+r'\s*,(?:[^\{\}]|\{[^\{\}]*\})*\}',re.MULTILINE)
@@ -216,11 +223,11 @@ for idx in selected_indices:
         #> identifier: https://info.arxiv.org/help/arxiv_identifier_for_services.html
         #> alternatively could consider using the arix API? (seems overkill for now)
         #> has arxiv entry?
-        if 'arxiv_eprints' in records["hits"]["hits"][idx]['metadata']:
-            arxiv_id = records["hits"]["hits"][idx]['metadata']['arxiv_eprints'][0]['value']
+        if 'arxiv_eprints' in rec['metadata']:
+            arxiv_id = rec['metadata']['arxiv_eprints'][0]['value']
             #> old style has the category prefix (primary)
             if not re.match(r'\d+\.\d+', arxiv_id):
-                arxiv_id = records['hits']['hits'][idx]['metadata']['arxiv_eprints'][0]['categories'][0] + '/' + arxiv_id
+                arxiv_id = rec['metadata']['arxiv_eprints'][0]['categories'][0] + '/' + arxiv_id
             spinner = Spinner(DOTS, 'downloading PDF for "{}" from arXiv:{}...'.format(texkey,arxiv_id))
             spinner.start()
             urllib.request.urlretrieve('http://arxiv.org/pdf/' + arxiv_id + '.pdf', pdf_file)

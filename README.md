@@ -4,11 +4,12 @@
 An [iNSPIRE](https://inspirehep.net) CLI script using its [REST API](https://github.com/inspirehep/rest-api-doc).
 
 ## Requirements
-Install the required packages using
+This script requires `python 3.9` or above.
+The requirements can be installed via
 ```
 python -m pip install -r requirements.txt
 ```
-or manually inspect the `requirements.txt` file.
+or by manually inspect the `requirements.txt` file.
 
 
 ## Usage
