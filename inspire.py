@@ -34,7 +34,8 @@ def get_config() -> configparser.ConfigParser:
             'bib_file': os.path.join(os.path.dirname(__file__),
                                      'bibliography', 'references.bib'),
             'pdf_dir': os.path.join(os.path.dirname(__file__),
-                                    'bibliography', 'bibtex-pdfs')
+                                    'bibliography', 'bibtex-pdfs'),
+            'download_pdf': True
         }
     }
     config = configparser.ConfigParser()
@@ -108,7 +109,7 @@ def make_label(record: dict, max_num_authors: int) -> str:
         author_list += ' et al.'
     label += '\t[bold]' + author_list + '[/bold]' + '\n'
     label += '\t[italic]"' + record['metadata']['titles'][0][
-        'title'] + '"[/italic]' + '\n'
+        'title'] + '"[/italic]' # + '\n'
     return label
 
 
@@ -118,15 +119,14 @@ def make_selection(records: list,
     #> using records &
     #> preprocessor=lambda rec: make_label(rec, max_num_authors),
     #> becomes *really* slow for large sizes
-    choices = [ make_label(rec, max_num_authors) for rec in records ]
-    selected_indices = select_multiple(
-        choices,
-        tick_character='◦',
-        pagination=True,
-        page_size=page_size,
-        return_indices=True,
-        tick_style='blue',
-        cursor_style='blue')
+    choices = [make_label(rec, max_num_authors) + '\n' for rec in records]
+    selected_indices = select_multiple(choices,
+                                       tick_character='◦',
+                                       pagination=True,
+                                       page_size=page_size,
+                                       return_indices=True,
+                                       tick_style='blue',
+                                       cursor_style='blue')
     return [records[i] for i in selected_indices]
 
 
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     console = Console()
     config = get_config()
 
-    parser = argparse.ArgumentParser(prog='iNSPIRE',
+    parser = argparse.ArgumentParser(prog='inspire.py',
                                      description='a simple CLI script to interact with iNSPIRE')
     parser.add_argument('query', nargs='*', help='the iNSPIRE query')
     parser.add_argument('-b', '--bib',
@@ -180,6 +180,11 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--update',
                         action='store_true',
                         help='update entire bibliography file')
+    parser.add_argument('--pdf',
+                        type=bool,
+                        nargs='?',
+                        const=True,
+                        help='flag if PDF file should be downloaded')
     parser.add_argument('--sort',
                         default='mostrecent',
                         choices=['mostrecent', 'mostcited'],
@@ -191,11 +196,11 @@ if __name__ == '__main__':
                         help='display record')
     parser.add_argument('--size',
                         type=int,
-                        default=int(config['query']['size']),
+                        default=config.getint('query', 'size'),
                         help='number of records to retrieve')
     parser.add_argument('--page-size',
                         type=int,
-                        default=int(config['local']['page_size']),
+                        default=config.getint('local', 'page_size'),
                         help='number of records to show per page')
     args = parser.parse_args()
     # console.print(args)
@@ -207,6 +212,7 @@ if __name__ == '__main__':
 
         bib_texkeys = bib_get_texkeys(args.bib)
         bib_bak = args.bib + '.bak'
+        #> restore backup?
         if os.path.exists(bib_bak):
             bak_texkeys = bib_get_texkeys(bib_bak)
             if confirm('found backup[{}] for {}[{}]. restore?'.format(
@@ -215,7 +221,7 @@ if __name__ == '__main__':
                 shutil.move(bib_bak, args.bib)
             else:
                 os.remove(bib_bak)
-        #@todo if backup exists ask user to restore it?
+        #> backup and update
         shutil.copyfile(args.bib, bib_bak)
         with open(args.bib, 'w') as bib:
             bib.write("# updated by {} on {} \n".format(
@@ -225,7 +231,13 @@ if __name__ == '__main__':
                       TimeRemainingColumn(),
                       TextColumn("[progress.description]{task.description}"),
                       transient=True) as progress:
-            task = progress.add_task("updating", total=len(bib_texkeys))
+            if args.pdf:
+                dl_pdf = args.pdf
+                nsteps = 2 * len(bib_texkeys)
+            else:
+                dl_pdf = False
+                nsteps = len(bib_texkeys)
+            task_id = progress.add_task("updating", total=nsteps)
             for texkey in bib_texkeys:
                 records, total = get_records(texkey, size=1)
                 records = list(
@@ -236,9 +248,19 @@ if __name__ == '__main__':
                     raise ValueError('error with "{}": {}/{}'.format(
                         texkey, len(records), total))
                 else:
+                    progress.update(task_id, description='{} BibTeX'.format(texkey))
                     bibtex = retrieve_link(records[0], 'bibtex')
                     bib_append_entry(args.bib, bibtex)
-                progress.update(task, advance=1.0, description=texkey)
+                    progress.update(task_id, advance=1.0)
+                    if dl_pdf:
+                        pdf_file = os.path.join(config['local']['pdf_dir'] , texkey + '.pdf')
+                        progress.update(task_id, description='{} PDF'.format(texkey))
+                        try:
+                            download_pdf(records[0], pdf_file, exist_ok=True)
+                        except Exception:
+                            pass
+                        progress.update(task_id, advance=1.0)
+
             os.remove(bib_bak)
 
 
@@ -248,11 +270,22 @@ if __name__ == '__main__':
     records, total = get_records(' '.join(args.query), args.sort, args.size)
     spinner.stop()
     records = list(filter(lambda rec : 'texkeys' in rec['metadata'], records))
-    console.print("total: {}; size: {}".format(total, len(records)))
 
     if total > 1:
-        records = make_selection(records, int(config['local']['max_num_authors']),
-                                 int(config['local']['page_size']))
+        console.print('showing {} from {} matches:\n'.format(len(records),total))
+        records = make_selection(records, config.getint('local', 'max_num_authors'),
+                                 config.getint('local', 'page_size'))
+    elif total == 1 and len(records) == 1:
+        if args.bib and not args.display:
+            #@todo: only if verbose?
+            console.print(
+                '\n' +
+                make_label(records[0], config.getint('local', 'max_num_authors')) + '\n')
+
+    if args.pdf:
+        dl_pdf = args.pdf
+    else:
+        dl_pdf = config.getboolean('local', 'download_pdf')
 
     #> all texkeys in the database
     if args.bib:
@@ -292,6 +325,8 @@ if __name__ == '__main__':
                 bib_append_entry(args.bib,bibtex)
 
             #> get the PDF file and save
+            if not dl_pdf:
+                continue
             pdf_file = os.path.join(config['local']['pdf_dir'] , texkey + '.pdf')
             spinner = Spinner(DOTS, 'downloading PDF for "{}"...'.format(texkey))
             spinner.start()
@@ -300,7 +335,7 @@ if __name__ == '__main__':
             except FileExistsError as e:
                 spinner.stop()
                 console.print(str(e))
-                if confirm( 're download?'):
+                if confirm('re-download?'):
                     spinner.start()
                     download_pdf(rec, pdf_file, exist_ok=True)
             except Exception as e:
