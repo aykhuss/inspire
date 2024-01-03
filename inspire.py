@@ -15,7 +15,7 @@ from rich.syntax import Syntax
 from rich.progress import (Progress, BarColumn, TaskProgressColumn,
                            TimeRemainingColumn, TextColumn)
 
-__version__ = '0.1'
+__version__ = '1.0'
 __author__ = 'Alexander Huss'
 
 
@@ -47,11 +47,13 @@ def get_config() -> configparser.ConfigParser:
                 'missing configuration file. create one now?\n[italic]{}[/italic]'
                 .format(config_file),
                 default_is_yes=True):
+
             default_size = prompt('default size of records to retrieve?',
                                   target_type=int,
                                   initial_value=config['query']['size'],
                                   validator=lambda count: count > 0)
             config.set(section='query', option='size', value=str(default_size))
+
             max_num_authors = prompt(
                 'maximum number of authors to display?',
                 target_type=int,
@@ -59,22 +61,28 @@ def get_config() -> configparser.ConfigParser:
                 validator=lambda count: count > 0)
             config.set(section='local', option='max_num_authors',
                        value=str(max_num_authors))
-            default_bib = prompt('default bibliography file?',
-                                 target_type=str,
-                                 initial_value=config['local']['bib_file'])
+
+            default_bib = prompt('bibliography file (default: {})'.format(
+                config['local']['bib_file']))
+            if not default_bib:
+                default_bib = config['local']['bib_file']
             config.set(section='local', option='bib_file',
                        value=os.path.expanduser(default_bib))
             os.makedirs(os.path.dirname(config['local']['bib_file']),
                         exist_ok=True)
-            with open(config['local']['bib_file'], 'w') as bib:
-                bib.write("# created by {} on {} \n".format(
-                    os.path.basename(__file__), datetime.now()))
-            default_pdf_dir = prompt('default directory for PDF files?',
-                                     target_type=str,
-                                     initial_value=config['local']['pdf_dir'])
+            if not os.path.exists(config['local']['bib_file']):
+                with open(config['local']['bib_file'], 'w') as bib:
+                    bib.write("# created by {} on {} \n".format(
+                        os.path.basename(__file__), datetime.now()))
+
+            default_pdf_dir = prompt('PDF directory (default: {})'.format(
+                config['local']['pdf_dir']))
+            if not default_pdf_dir:
+                default_pdf_dir = config['local']['pdf_dir']
             config.set(section='local', option='pdf_dir',
                        value=os.path.expanduser(default_pdf_dir))
             os.makedirs(config['local']['pdf_dir'], exist_ok=True)
+
             with open(config_file, 'w') as cfg:
                 config.write(cfg)
     return config
