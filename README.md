@@ -34,8 +34,11 @@ We can also update all records of an existing BibTeX file by adding the `--updat
 
 ![update](./examples/update.gif)
 
+### PDF download
+In the configuration file, you can also specify a default folder for PDF downloads. The option `--pdf` will try to find the PDF from arXiv and download it to that folder. 
+
 ### Help
-Check out help dialogue for usage
+Check out help dialogue for usage and more information. 
 ```
 inspire.py -h 
 ```
