@@ -21,7 +21,7 @@ __author__ = 'Alexander Huss'
 
 def get_config() -> configparser.ConfigParser:
     #> local configuration file
-    config_file = os.path.join(os.path.dirname(__file__), 'inspire.ini')
+    config_file = os.path.expanduser('~/.inspire.conf')
     #> default settings
     config_defaults = {
         'query': {

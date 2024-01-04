@@ -159,6 +159,5 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# local configuration & default bibliography location
-inspire.ini
+# default bibliography location
 bibliography/
