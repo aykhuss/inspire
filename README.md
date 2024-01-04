@@ -9,7 +9,7 @@ The requirements can be installed via
 ```
 python -m pip install -r requirements.txt
 ```
-or by manually inspect the `requirements.txt` file.
+or manually inspect the `requirements.txt` file.
 
 
 ## Usage
