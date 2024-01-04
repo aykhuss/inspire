@@ -103,6 +103,44 @@ def get_records(query: str,
     return inspire_result["hits"]["hits"], inspire_result["hits"]["total"]
 
 
+def parse_arxiv(query: list[str]) -> tuple[str, list]:
+    values = list()
+    categories = list()
+    value = ''
+    for q in map(
+            lambda x: re.sub(r'(?:arxiv|\[|\]|:)', '', x, 0, re.IGNORECASE),
+            query):
+        for qq in q.split('/'):
+            if not qq: continue
+            values.extend(re.findall(r'\d+\.?\d+', qq))
+            categories.extend(re.findall(r'[^ 0-9.]+', qq))
+    if len(values) == 1:
+        value = values[0]
+    else:
+        raise ValueError('multiple values ({}) in {}?'.format(values, query))
+    return value, categories
+
+def match_arxiv(record: dict, value: str, categories: list) -> bool:
+    match = False
+    if 'arxiv_eprints' in record['metadata']:
+        for eprint in record['metadata']['arxiv_eprints']:
+            if eprint['value'] == value:
+                if len(categories) > 0:
+                    match = match or any(
+                        map(lambda c: c in categories, eprint['categories']))
+                else:
+                    match = True
+    return match
+
+def match_texkey(record: dict, query: list[str]) -> bool:
+    match = False
+    if len(query) != 1: return False
+    if 'texkeys' in record['metadata']:
+        if query[0] in record['metadata']['texkeys']:
+            match = True
+    return match
+
+
 def make_label(record: dict, max_num_authors: int) -> str:
     label = ''
     label += '\t[underline]' + record['metadata']['texkeys'][0] + '[/underline]'
@@ -154,16 +192,17 @@ def bib_append_entry(bib_file: str, bibtex: str) -> None:
 def retrieve_link(record: dict, key: str = 'bibtex') -> str:
     return urllib.request.urlopen(
         record['links'][key]).read().decode('utf-8')
+
 def download_pdf(record: dict, dest_file: str, exist_ok: bool = False) -> None:
     if os.path.exists(dest_file) and not exist_ok:
         raise FileExistsError('"{}" already exists'.format(dest_file))
     else:
         #> identifier: https://info.arxiv.org/help/arxiv_identifier_for_services.html
         #> alternatively could consider using the arix API? (seems overkill for now)
-        if 'arxiv_eprints' in rec['metadata']:
+        if 'arxiv_eprints' in record['metadata']:
             arxiv_id = record['metadata']['arxiv_eprints'][0]['value']
             #> old style has the category prefix (primary)
-            if not re.match(r'\d+\.\d+', arxiv_id):
+            if not re.fullmatch(r'\d+\.\d+', arxiv_id):
                 arxiv_id = record['metadata']['arxiv_eprints'][0][
                     'categories'][0] + '/' + arxiv_id
             urllib.request.urlretrieve(
@@ -180,6 +219,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='inspire.py',
                                      description='a simple CLI script to interact with iNSPIRE')
     parser.add_argument('query', nargs='*', help='the iNSPIRE query')
+    group = parser.add_mutually_exclusive_group(required=False)
+    group.add_argument('--texkey', action='store_true', help='query a cite texkey')
+    group.add_argument('--arxiv', action='store_true', help='query an arXiv id')
     parser.add_argument('-b', '--bib',
                         type=str,
                         nargs='?',
@@ -277,7 +319,18 @@ if __name__ == '__main__':
     spinner.start()
     records, total = get_records(' '.join(args.query), args.sort, args.size)
     spinner.stop()
-    records = list(filter(lambda rec : 'texkeys' in rec['metadata'], records))
+    records = list(filter(lambda r : 'texkeys' in r['metadata'], records))
+
+    if args.arxiv:
+        records = list(
+            filter(lambda r: match_arxiv(r, *parse_arxiv(args.query)), records))
+        if len(records) > 1:
+            raise ValueError('--arxiv not unnique?! "{}"'.format(args.query))
+
+    if args.texkey:
+        records = list(filter(lambda r: match_texkey(r, args.query), records))
+        if len(records) > 1:
+            raise ValueError('--texkey not unnique?! "{}"'.format(args.query))
 
     if total > 1:
         console.print('showing {} from {} matches:\n'.format(len(records),total))
