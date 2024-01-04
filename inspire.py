@@ -333,7 +333,7 @@ if __name__ == '__main__':
             raise ValueError('--texkey not unnique?! "{}"'.format(args.query))
 
     if total > 1:
-        console.print('showing {} from {} matches:\n'.format(len(records),total))
+        console.print('showing {} from {} matches'.format(len(records),total))
         records = make_selection(records, config.getint('local', 'max_num_authors'),
                                  config.getint('local', 'page_size'))
     elif total == 1 and len(records) == 1:
@@ -371,8 +371,9 @@ if __name__ == '__main__':
                 lexer = 'text'
             spinner = Spinner(DOTS, "fetching {} for {}...".format(key,texkey))
             spinner.start()
-            syntax = Syntax('\n' + retrieve_link(rec, key), lexer=lexer, word_wrap=True)
+            syntax = Syntax(retrieve_link(rec, key).strip(), lexer=lexer, word_wrap=True)
             spinner.stop()
+            console.print()
             console.print(syntax)
         else:
             spinner = Spinner(DOTS, "fetching BibTeX for {}...".format(texkey))
