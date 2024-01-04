@@ -346,7 +346,10 @@ if __name__ == '__main__':
     if args.pdf:
         dl_pdf = args.pdf
     else:
-        dl_pdf = config.getboolean('local', 'download_pdf')
+        if args.bib and args.bib == config['local']['bib_file']:
+            dl_pdf = config.getboolean('local', 'download_pdf')
+        else:
+            dl_pdf = False
 
     #> all texkeys in the database
     if args.bib:
